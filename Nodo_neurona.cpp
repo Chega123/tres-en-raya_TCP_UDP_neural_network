@@ -26,6 +26,9 @@
 #include <sstream>
 #include <map>
 #include <iterator>
+#include<mutex>
+#include <random>
+#include <chrono>
 
 #define MAXLINE 1000
 using namespace std;
@@ -44,22 +47,23 @@ vector<pair<vector<int>, int>> training_data;
 int seq_number=0;
 vector<vector<double>> all_weights;
 vector<double>avg_weights(40);
-
-
+int num_cliente=0;
+mutex mtx; 
+bool server_existente=false;
 void leer_configuracion(const string &config) {
-    cout<<config<<endl;
-    cout<<"entre a funcion leer_config"<<endl;
     int pos = 0;
 	configuraciones.clear();
     while (pos < config.size()) {
         Configuracion nodo_actual;
         nodo_actual.puerto = stoi(config.substr(pos, 5));
-        cout<<nodo_actual.puerto<<endl;
         pos += 5;
-        nodo_actual.es_maestro = (config[pos] == '1');
+        int maestro = stoi(config.substr(pos, 1));
+        if (maestro == 1){
+            nodo_actual.es_maestro =true;
+        }
+        else{nodo_actual.es_maestro =false;}
         pos += 1;
         configuraciones.push_back(nodo_actual);
-        cout<<"nodo asignado en config"<<endl;
     }
     
     int puerto_maestro = -1;
@@ -69,18 +73,16 @@ void leer_configuracion(const string &config) {
             break;
         }
     }
-
+    cout<<"puerto maestro: "<<puerto_maestro<<endl;
     for (auto& nodo : configuraciones) {
-        if (!nodo.es_maestro) {
-            nodo.puerto_maestro = puerto_maestro;
-        }
+        nodo.puerto_maestro = puerto_maestro;
     }
 }
 
-int num_clientes = 0;    
+  
 int total_Cli = configuraciones.size();
 vector<int>mapa_clientes;
-
+bool terminar=false;
 
 
 void sendmsg(int sockfd,  sockaddr_in servaddr ,string& message){
@@ -235,14 +237,15 @@ Perceptron p(9, 4);
 
 vector<double> string_to_vector_weights(string weight,int len){
     //cout<<"funcion de string a vector"<<weight<<endl;
-    vector<double>pesosfun(40);
+    vector<double>pesosfun;
+    int contador=0;
     string peso="";  
     for (int i=0;i<=len;i++){
         if (weight[i]==','){
-            cout<<"version string"<<peso<<"version double:"<<stod(peso)<<endl;
+           // cout<<"contador: "<<contador<<"  version string"<<peso<<"version double:"<<stod(peso)<<endl;
             pesosfun.push_back(stod(peso));
             peso="";
-            
+            contador++;
         }
         else{
             peso+=weight[i];
@@ -253,60 +256,79 @@ vector<double> string_to_vector_weights(string weight,int len){
 }
 
 
-void funcion_RW_SCli(int S_Cliente){
-    cout<<"solte thread"<<endl;
+
+void funcion_RW_SCli(int S_Cliente){  
+    //cout<<"solte thread"<<endl;
 	char bufferw[MAXLINE];
 	mapa_clientes.push_back(S_Cliente);
+    bool termino=false;
     for(;;){
-      int length;
-      bzero(bufferw,MAXLINE);
-      read(S_Cliente, bufferw, 1); 
-      if (bufferw[0] == 'w') { 
-        cout<<"me llego un peso"<<endl;
-        //cout<<"clientes que llegaron:"<<num_clientes<<" Clientes totales: "<<total_Cli<<endl;
-        read(S_Cliente, bufferw, 3); 
-        int weigth_len=atoi(bufferw);
-        cout<<weigth_len<<endl;
-        read(S_Cliente,bufferw,weigth_len);
-        cout<<"la info que le llega"<<bufferw<<endl;
-        string weights_string=bufferw+',';
-        cout<<"pesos que me mandaron:  "<<weights_string<<endl<<endl<<endl;
-        if (num_clientes < total_Cli) {
-            all_weights.push_back(string_to_vector_weights(weights_string,weigth_len));
-            cout<<"agregando"<<all_weights[1][1]<<endl;
+        int length;
+        bzero(bufferw,MAXLINE);
+        read(S_Cliente, bufferw, 1); 
+        if (bufferw[0] == 'w') { 
+            cout<<"me llego un peso"<<endl;
+            //cout<<"clientes que llegaron:"<<num_clientes<<" Clientes totales: "<<total_Cli<<endl;
+            read(S_Cliente, bufferw, 3); 
+            int weigth_len=atoi(bufferw);
+            cout<<weigth_len<<endl;
+            read(S_Cliente,bufferw,weigth_len);
+            //cout<<"la info que le llega"<<bufferw<<endl;
+            string weigth_cadena=bufferw;
+            weigth_cadena+=",";
+            //cout<<"pesos que me mandaron:  "<<weigth_cadena<<endl<<endl<<endl;
+            total_Cli = configuraciones.size();
 
-            num_clientes++;
-        }
-        if(num_clientes==total_Cli){
-            for(auto vector:all_weights){
-                for(int i=0;i<40;i++){
-                    avg_weights[i] +=vector[i];
-                    //cout<<"numero "<<i<<"  "<<avg_weights[i]<<endl;
+            if (num_cliente < total_Cli) {
+                all_weights.push_back(string_to_vector_weights(weigth_cadena,weigth_len+1));
+                mtx.lock();
+                num_cliente++;
+                termino=true;
+                mtx.unlock();
+            }
+            if(num_cliente==total_Cli){
+                cout<<"entro a esta cosa"<<endl;
+                for(auto vector:all_weights){
+                    for(int i=0;i<40;i++){
+                        avg_weights[i] +=vector[i];
+                    //  cout<<"numero "<<i<<"  "<<avg_weights[i]<<endl;
+                    }
+                    
                 }
-                
-            }
-            for(auto pes:avg_weights){
-                //cout<<"suma de peso"<<pes<<endl;
-                pes/=total_Cli;
-               // cout<<"promedio de un solo peso"<<pes<<endl;
-            }
-            cout<<"saque promedio"<<endl;
-            for (auto cli:mapa_clientes){
+                cout<<total_Cli<<endl;
+                mtx.lock();
+                for (int j=0;j<40;j++){
+                    avg_weights[j]=avg_weights[j]/total_Cli;
+                }
+                mtx.unlock();
+                cout<<"saque promedio"<<endl;
                 string pesos_string = vector_to_string(avg_weights);
-                cout<<"pesos promedio: "<<pesos_string<<endl;
                 int length_pe_string=pesos_string.length();
                 string protocol="W";
                 if(length_pe_string<100){protocol+="0";}
                 if(length_pe_string<10){protocol+="0";}
                 protocol+=to_string(length_pe_string)+pesos_string;
                 cout<<"Estoy enviando sus promedios: "<<protocol<<endl;
-                char* char_msg=new char[protocol.length()];
-                strcpy(char_msg,protocol.c_str());
-                write(cli,char_msg, protocol.length());
+                bzero(bufferw,MAXLINE);
+                for (auto cli:mapa_clientes){
+                    //cout<<"pesos promedio: "<<pesos_string<<endl;
+                    char* char_msg=new char[protocol.length()];
+                    strcpy(char_msg,protocol.c_str());
+                    write(cli,char_msg, protocol.length());
+                }
+                terminar=true;
+                break;
             }
-      	}
-      } 
-    }  
+        } 
+        cout<<termino<<endl;
+        if(termino==true){
+            cout<<"no entro D:"<<endl;
+
+            break;
+        }
+
+    } 
+    cout<<"saliste thread"<<endl; 
 }
 
 
@@ -316,21 +338,38 @@ void server_TCP_thread(){
   int S_Server = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
 	cout<<"me toco ser el maestro"<<endl;
   int n;
-
   memset(&stSockAddr, 0, sizeof(struct sockaddr_in));
 
   stSockAddr.sin_family = AF_INET;
   stSockAddr.sin_port = htons(Port_codigo);
+  cout<<"Soy el server y este es mi puerto: "<<Port_codigo<<endl;
   stSockAddr.sin_addr.s_addr = INADDR_ANY;
   bind(S_Server,(const struct sockaddr *)&stSockAddr, sizeof(struct sockaddr_in));
   listen(S_Server, 10);
-
+  int num=0;
   for(;;)
   {
-    int S_Cliente = accept(S_Server, NULL, NULL);
-		thread (funcion_RW_SCli,S_Cliente).detach();
+    if (terminar==true){ 
+        mapa_clientes.clear();
+        all_weights.clear();
+        num_cliente=0;
+        total_Cli=configuraciones.size();
+        num=0;
+        mtx.lock();
+        terminar=false;
+        mtx.unlock();
+    }
+    if(num<total_Cli){
+        //cout<<"conecte algo"<<endl;
+        int S_Cliente = accept(S_Server, NULL, NULL);
+
+        cout<<"se conecto alguien"<<endl;
+        num++;
+        thread (funcion_RW_SCli,S_Cliente).detach();
+        //cout<<terminar<<endl;
+        }
   }
-	close(S_Server);
+	
 }
 
 void Client_TCP(int Puerto,string mensaje){
@@ -338,45 +377,81 @@ void Client_TCP(int Puerto,string mensaje){
     cout<<"dentro de cliente TCP"<<endl;
     int Res;
     int SocketCliente = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-  
     memset(&stSockAddr, 0, sizeof(struct sockaddr_in));  
     stSockAddr.sin_family = AF_INET;
+    cout<<"soy el  cliente y me estoy conectando a: "<<Puerto<<endl;
     stSockAddr.sin_port = htons(Puerto);
     Res = inet_pton(AF_INET, "127.0.0.1", &stSockAddr.sin_addr);
     connect(SocketCliente, (const struct sockaddr *)&stSockAddr, sizeof(struct sockaddr_in));
     char buffer[MAXLINE];
+    cout<<"mi protocolo de pesos"<<mensaje<<endl;
+    cout<<"puerto al que me conecto" <<Puerto<<endl;
     char* char_protocol=new char[mensaje.length()+1];
     strcpy(char_protocol,mensaje.c_str());
     write(SocketCliente,char_protocol,mensaje.length()+1);
-    cout<<"mande mis pesos: "<<mensaje<<endl;
-		char buffer2[255] = {};
-		for (;;) {  
-			int n = read(SocketCliente, buffer, 1);
-			if (n > 0) {
-					if  (buffer[0]=='W'){
-						read(SocketCliente, buffer2, 3);
-						int len_msg=atoi(buffer);
-						read(SocketCliente, buffer2, len_msg);
-						string pesos_nuevos=buffer2;
-                        cout<<"pesos nuevos: "<<pesos_nuevos<<endl;
-						p.set_weights_and_biases(string_to_vector_weights(pesos_nuevos,len_msg));
-    				    shutdown(SocketCliente,SHUT_RDWR);
-					}
-			}
-		}
+    bzero(buffer,MAXLINE);
+    for (;;) {  
+        int n = read(SocketCliente, buffer, 1);
+        if (n > 0) {
+            if  (buffer[0]=='W'){
+                read(SocketCliente, buffer, 3);
+                int len_msg=atoi(buffer);
+                //cout<<"tamaño de la data de pesos_"<<len_msg<<endl;
+                read(SocketCliente, buffer, len_msg);
+                //cout<<"pesos que me llegaron: "<<buffer<<endl<<endl;
+                string pesos_nuevos=buffer;
+                //cout<<"pesos nuevos: "<<pesos_nuevos<<endl;
+                p.set_weights_and_biases(string_to_vector_weights(pesos_nuevos,len_msg));
+                cout<<"puse los pesos nuevos"<<endl;
+                cout<<"desconecte cliente"<<endl;
+                //shutdown(SocketCliente,SHUT_RDWR);
+                //close(SocketCliente);
+                break;
+            }
+        }  
+        //cout<<"sigo vivo"<<endl; 
+    }
+}
+
+
+
+void agregarJugadasPosibles( string tablero, vector<vector<int>>& tableros_opciones) {
+    for (int i = 0; i < tablero.size(); ++i) {
+        if (tablero[i] == '0') {
+            vector<int> jugada(tablero.size());
+            for (int j = 0; j < tablero.size(); ++j) {
+                jugada[j] = tablero[j] - '0'; 
+            }
+            jugada[i] = 1;
+            tableros_opciones.push_back(jugada);
+        }
+    }
+    unsigned seed = chrono::system_clock::now().time_since_epoch().count();
+    shuffle(tableros_opciones.begin(), tableros_opciones.end(), default_random_engine(seed));
+}
+int max_ind(vector<int>vector){
+    int max_index=0;
+    for(size_t i=1;i<vector.size();++i){
+        if(vector[i]>vector[max_index]){
+            max_index=i;
+        }
+    }
+    return max_index;
 }
 
 void lectura(int sockfd, sockaddr_in servaddr){
   int len=sizeof(servaddr);
-  char buffer[MAXLINE];
-
   int last_seq = 0; // Número de secuencia esperado
   map<int, string> missing_packets;
+
   while(1){
+    char buffer[MAXLINE];
     int n = recvfrom(sockfd, (char *)buffer, MAXLINE,MSG_WAITALL, (struct sockaddr *) &servaddr,(socklen_t*)&len);
     int pos=0;
     if(n>0){
       string msg=buffer;
+      //cout<<msg<<endl;
+      //cout<<"Existe un server"<<server_existente<<endl;
       char tipo=msg[0];
       pos+=1;
       if (tipo == 'T') {
@@ -404,27 +479,30 @@ void lectura(int sockfd, sockaddr_in servaddr){
                         }
                     }
                 }
+                bzero(buffer,MAXLINE);
             } else {
                 missing_packets[secuencianumber] = datos;
                 string protocolo = "s" + to_string(last_seq + 1);
                 string solicitud=padding(protocolo,'#');
                 sendto(sockfd, solicitud.c_str(), solicitud.length(), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+                bzero(buffer,MAXLINE);
             }
         } else {
             string protocolo = "s" + to_string(secuencianumber);
             string solicitud=padding(protocolo,'#');
             sendto(sockfd, solicitud.c_str(), solicitud.length(), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+            bzero(buffer,MAXLINE);
         }
       }
         if (tipo == 'E'){
+
             double learning_rate = 0.1;
-            cout<<"comenzamos a entrenar"<<endl;
             for (int epoch = 0; epoch < 100; ++epoch) {
+                //cout<<"entrenando epoca: "<<epoch<<endl;
                 for (const auto& data : training_data) {
                 p.train(data.first, data.second, learning_rate);
                 }
             }  
-            cout<<"terminamos a entrenar"<<endl;
             vector<double>pesos_actuales=p.get_weights_and_biases();
             string pesos_protocolo=vector_to_string(pesos_actuales);
             int length_string=pesos_protocolo.length();
@@ -432,37 +510,71 @@ void lectura(int sockfd, sockaddr_in servaddr){
             if(length_string<100){protocol+="0";}
             if(length_string<10){protocol+="0";}
             protocol+=to_string(length_string)+pesos_protocolo;
-            
-            
-            //cout<<"Puerto maestro: "<<configuraciones.begin()->puerto_maestro<<endl;
-            if (Port_codigo!=configuraciones.begin()->puerto_maestro){
-                cout<<"llego a lanzar cliente?"<<endl;
-                Client_TCP(configuraciones.begin()->puerto_maestro, protocol);}
-            else{
-                all_weights.push_back(p.get_weights_and_biases());
-            }
+            thread(Client_TCP,configuraciones.begin()->puerto_maestro, protocol).detach();
+            bzero(buffer,MAXLINE);
         }
         if(tipo == 'F'){
             int tam_file = stoi(msg.substr(pos, 3));
             pos+=3;
             string file_conf = msg.substr(pos, tam_file);
             leer_configuracion(file_conf);
-
+            //cout<<"lista de puertos "<<endl
             cout<<"puerto maestrito :D "<<configuraciones.begin()->puerto_maestro<<endl;
 
-            if(configuraciones.begin()->puerto_maestro==Port_codigo){
-                thread(server_TCP_thread).detach();
-            }
             //cout<<"recibi file config"<<endl;
             total_Cli = configuraciones.size();
             //cout<<"clientes totales: "<<total_Cli<<endl;
-            cout<<Port_codigo<<endl;
+            //cout<<Port_codigo<<endl;
+            bzero(buffer,MAXLINE);
+             if(configuraciones.begin()->puerto_maestro==Port_codigo){
+                cout<<"cree server  "<<endl;
+                thread(server_TCP_thread).detach();
+            }
+            
+
         }
         if(tipo == 'K'){
             string protocol_keep="k"+to_string(Port_codigo);
             string solicitud=padding(protocol_keep,'#');
+            //cout<<"mande keep alive confirmacion"<<endl;
+            bzero(buffer,MAXLINE);
             sendto(sockfd, solicitud.c_str(), solicitud.length(), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 			}
+        if(tipo=='G'){
+            vector<vector<int>> tableros_opciones;
+            string tablero_actual=msg.substr(pos, 9);
+            pos+=9;
+            string id=msg.substr(pos, 1);
+            pos+=1;
+            cout<<tablero_actual<<endl;
+            agregarJugadasPosibles(tablero_actual, tableros_opciones);
+            vector<int>resultados(tableros_opciones.size());
+            int contador=0;
+            for(auto it_tableros:tableros_opciones){
+                vector<double> result = p.predict(it_tableros);
+                cout<<"Hay algo en lo de results? "<<result[0]<<endl;
+                int predicted_class = distance(result.begin(), max_element(result.begin(), result.end()));
+                cout<<"prediccion "<<predicted_class<<endl;
+                resultados[contador]=predicted_class;
+                contador++;
+            }
+            cout<<"calcule jugada"<<endl;
+            int eleccion=max_ind(resultados);
+            cout<<resultados[1]<<endl;
+            string tablero_mandar;
+            for(int i=0;i<9;i++ ){
+                cout<<"tablero ganador partes"<<tableros_opciones[eleccion][i]<<endl;
+                tablero_mandar+=to_string(tableros_opciones[eleccion][i]);
+            }
+
+            cout<<"mandare este tablero: "<<tablero_mandar<<endl;
+            string proto="A"+tablero_mandar+id;
+            string solicitud=padding(proto,'#');
+            cout<<solicitud<<endl;
+            bzero(buffer,MAXLINE);
+            sendto(sockfd, solicitud.c_str(), solicitud.length(), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+
+        }
     }
   }
 }

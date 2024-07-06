@@ -19,12 +19,13 @@
 #include <stdlib.h>
 #include<iostream>
 #include<thread>
+
 using namespace std;
 #define PORT    8080
 #define MAXLINE 1000
 
 struct sockaddr_in       servaddr;
-
+string tablero="000000000";
 void sendmsg(int sockfd,  sockaddr_in servaddr ,string& message){
         sendto(sockfd, message.c_str(), message.length(),MSG_CONFIRM, (const struct sockaddr *) &servaddr,sizeof(servaddr));
 }
@@ -46,7 +47,39 @@ void procesar(int sockfd,sockaddr_in servaddr,string message){
         msg=padding(protocol,'#');
         sendmsg(sockfd,servaddr,msg);
     }
+    if((strcmp(message.c_str(),"jugar"))==0){
+        tablero="000000000";
+        string protocol="j"+tablero;
+        msg=padding(protocol,'#');
+        sendmsg(sockfd,servaddr,msg);
+    }
+    if((strcmp(message.c_str(),"pos"))==0){
+        string posicion;
+        getline(cin,posicion);
+        if(stoi(posicion)<9){
+            tablero[stoi(posicion)]='2';
+            string protocol="g"+tablero;
+            msg=padding(protocol,'#');
+            sendmsg(sockfd,servaddr,msg);
+        }
+    }
+}
 
+void imprimirTablero(string tablero) {
+    for (int i = 0; i < 9; i += 3) {
+        // Imprimir cada fila del tablero
+        for (int j = 0; j < 3; ++j) {
+            char c = tablero[i + j];
+            if (c == '0') {
+                cout << "| ";
+            } else if (c == '1') {
+                cout << "|X";
+            } else if (c == '2') {
+                cout << "|O";
+            }
+        }
+        cout << "|" << endl;
+    }
 }
 
 void lectura(int sockfd, sockaddr_in servaddr){
@@ -66,8 +99,22 @@ void lectura(int sockfd, sockaddr_in servaddr){
                 pos+=error_length;
                 cout<<error<<endl;
             }
-        bzero(buffer,MAXLINE);
+            if(tipo=='J'){
+                cout<< "iniciaste partida pon posicion  (pos y el numero)"<<endl;
+                cout<<"|0|1|2|"<<endl<<"|3|4|5|"<<endl<<"|6|7|8|"<<endl;
+            }
+            if(tipo=='a'){
+                tablero=msg.substr(pos,9);
+                imprimirTablero(tablero);  
+            }
+            if(tipo=='R'){
+                int tam=stoi(msg.substr(pos,1));
+                pos+=1;
+                string palabra= msg.substr(pos,tam);
+                cout<<palabra<<endl; 
+            }
         }
+    bzero(buffer,MAXLINE);
     }
 }
 
