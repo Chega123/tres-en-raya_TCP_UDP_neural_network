@@ -441,7 +441,7 @@ int max_ind(vector<int>vector){
 
 void lectura(int sockfd, sockaddr_in servaddr){
   int len=sizeof(servaddr);
-  int last_seq = 0; // Número de secuencia esperado
+  int last_seq = -1; // Número de secuencia esperado
   map<int, string> missing_packets;
 
   while(1){
@@ -457,15 +457,20 @@ void lectura(int sockfd, sockaddr_in servaddr){
       if (tipo == 'T') {
         int pos = 1;
         int secuencianumber = stoi(msg.substr(pos, 2));
+        
         pos += 2;
         string datos = msg.substr(pos, 900);
+        
         pos += 900;
         int check = sum_digits(datos) % 256;
         int checksum = stoi(msg.substr(pos, 3));
+        
         pos += 3;
         if (check == checksum) {
             if (secuencianumber == last_seq + 1) {
-
+                cout<<secuencianumber<<endl;
+                cout<<datos<<endl<<endl<<endl;
+                cout<<"check: "<<check<<"checksum: "<<checksum<<endl;
                 convert_string_to_vector(datos);
                 cout<<"me llego uno de los 90 tableros"<<endl;
                 last_seq = secuencianumber;

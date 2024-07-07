@@ -257,7 +257,9 @@ void procesar(int sockfd, sockaddr_in Cli_addr, string message ){
                 if(checksum<100){protocol+="0";}
                 if(checksum<10){protocol+="0";}
                 protocol+=to_string(checksum);
+                cout<<protocol<<endl<<endl;
                 answer=padding(protocol,'#');
+                
                 paquetes_enviados[port].push_back(answer);
                 sendmsg(sockfd,it.second,answer);
             }
