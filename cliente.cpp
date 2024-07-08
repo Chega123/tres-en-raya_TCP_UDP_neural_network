@@ -57,10 +57,13 @@ void procesar(int sockfd,sockaddr_in servaddr,string message){
         string posicion;
         getline(cin,posicion);
         if(stoi(posicion)<9){
+            if(tablero[stoi(posicion)]=='1'){
+            }
+            else{
             tablero[stoi(posicion)]='2';
             string protocol="g"+tablero;
             msg=padding(protocol,'#');
-            sendmsg(sockfd,servaddr,msg);
+            sendmsg(sockfd,servaddr,msg);}
         }
     }
 }
@@ -126,7 +129,7 @@ int main() {
 
         
 
-        host = (struct hostent *)gethostbyname((char *)"127.0.0.1");
+        host = (struct hostent *)gethostbyname((char *)"3.87.67.41");
 
 
         // Creating socket file descriptor
